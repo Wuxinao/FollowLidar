@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/w/502D/icp_visual/devel/include/**",
+        "/home/w/502D/NewLoc2D_ws/devel/include/**",
+        "/home/w/livox/ws_livox/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/home/w/livox/ws_livox/src/SC-PGO/include/**",
+        "/home/w/livox/ws_livox/src/FAST_LIO/include/**",
+        "/home/w/livox/calib/src/livox_camera_calib/include/**",
+        "/home/w/livox/pc_converter/src/pointcloud_convert/include/**",
+        "/home/w/usb_cam/src/usb_cam/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

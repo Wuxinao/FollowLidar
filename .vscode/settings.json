@@ -1,0 +1,16 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/w/502D/icp_visual/devel/lib/python3/dist-packages",
+        "/home/w/502D/NewLoc2D_ws/devel/lib/python3/dist-packages",
+        "/home/w/r3live/devel/lib/python3/dist-packages",
+        "/home/w/livox/ws_livox/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/w/502D/icp_visual/devel/lib/python3/dist-packages",
+        "/home/w/502D/NewLoc2D_ws/devel/lib/python3/dist-packages",
+        "/home/w/r3live/devel/lib/python3/dist-packages",
+        "/home/w/livox/ws_livox/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ]
+}
