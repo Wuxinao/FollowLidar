@@ -4,8 +4,8 @@
         <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find icp_viewer)/config/rviz/icp_viewer.rviz" />
     </group>
     
-    <arg name="map_env" default="Route_all" />
-    <arg name="bag_file" default="lidar_2023-09-19-13-00-00.bag" />
+    <arg name="map_env" default="XinaoTest" />
+    <arg name="bag_file" default="8.bag" />
     <!-- <arg name="bag_file" default="9.bag" /> -->
     <node  pkg="icp_viewer" type="icp_viewer_node" name="icp_viewer_node" respawn="false" output="screen">
         <param name="PRMTR_strMapFolder" type="string" value="$(find icp_viewer)/data/$(arg map_env)/" />

@@ -38,7 +38,24 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	pbl_Publish_Match = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Match_Lasttime = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
-	// fp_odometry = fopen("/home/w/502D/NewLoc2D_ws/odometry.txt", "a");
+	fp_odometry = fopen("/home/w/502D/NewLoc2D_ws/odometry.txt", "a");
+
+	// init pose disturbance
+	pbl_InitPose_Disturbance.clear();
+	for (int i = 0; i < 9; i++)
+	{
+		pbl_STU_Pose2DStamped pose_disturbance;
+		pose_disturbance.x = (i % 3 - 1) * 0.1;
+		pose_disturbance.y = - (i / 3 - 1) * 0.1;
+		if (i % 4 == 2)
+			pose_disturbance.phi = - 5 * M_PI / 180;
+		else if (i == 0 || i == 8)
+			pose_disturbance.phi = 5 * M_PI / 180;
+		else
+			pose_disturbance.phi = 0;
+
+		pbl_InitPose_Disturbance.push_back(pose_disturbance);
+	}
 
 	// from launch file
 	// Set project name
@@ -278,7 +295,7 @@ void CLS_GridMapLocalization::prv_fnc_UpdateGridMap()
 
 	// pbl_GridMap2D = ogm;
 	pbl_GridMap2D = my_ogm;
-	printf("here! %d \n",prv_m_map_size_);
+	// printf("here! %d \n",prv_m_map_size_);
 }
 
 /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
@@ -313,7 +330,7 @@ void CLS_GridMapLocalization::prv_fnc_CutSectorMap(double middle_angle)
 			// double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - prv_map_center_y_;
 			// if (mappnt_x_to_center * cos(map_sector_1piece.middle_angle) + mappnt_y_to_center * sin(map_sector_1piece.middle_angle) < -1e-5) //dot product
 
-			for (int nPnt = 0; nPnt < pbl_vec_Gridmap[nMap].set_pntXYI.size(); nPnt+=2)	//downsample
+			for (int nPnt = 0; nPnt < pbl_vec_Gridmap[nMap].set_pntXYI.size(); nPnt+=5)	//downsample
 			{
 				double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - prv_map_center_y_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].y * prv_map_resolution_;
 				double mappnt_x_to_center = pbl_vec_Gridmap[nMap].pntOrigin.x - prv_map_center_x_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].x * prv_map_resolution_;
@@ -324,11 +341,11 @@ void CLS_GridMapLocalization::prv_fnc_CutSectorMap(double middle_angle)
 				{
 					map_sector_1piece.map_sector_data.x_vec.push_back(mappnt_x_to_center);
 					map_sector_1piece.map_sector_data.y_vec.push_back(mappnt_y_to_center);
-					map_sector_1piece.map_sector_data.z_vec.push_back(1.0);
+					map_sector_1piece.map_sector_data.z_vec.push_back(0);
 				}
 			}
 		}
-		printf("sector cut finish. num of points in sector: %d\n", map_sector_1piece.map_sector_data.x_vec.size());
+		// printf("sector cut finish. num of points in sector: %d\n", map_sector_1piece.map_sector_data.x_vec.size());
 
 	// }
 }
@@ -409,7 +426,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 			// ------------------------------------------------------
 			//		Find the matching (for a points map)
 			// ------------------------------------------------------
-			printf("%d", local_ICP_Params.nPointOffset);
+			// printf("%d", local_ICP_Params.nPointOffset);
 			my_determineMatching2D(my_Match_Cloud, my_matching_result_, vec_MathingPair, local_ICP_Params);
 
 			if (!vec_MathingPair.size())
@@ -460,7 +477,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 	nStep = prv_ICP_Params_Fixed.nPointDecimation;
 	*pbl_Publish_Match = *my_matching_result_;
 	pbl_MatchingPair = vec_MathingPair;
-	printf("ICP match finish.\n");
+	// printf("ICP match finish.\n");
 	// fprintf(fp_odometry, "%.6f\t%.6f\t%.6f\t%.6f\t\n", pbl_Publish_Match->timestamp, pbl_Publish_Match->x, pbl_Publish_Match->y, pbl_Publish_Match->phi);
 	// printf("HereB\n");
 	// printf("outInfo_nIterations: %d\n", outInfo_nIterations);
@@ -473,13 +490,13 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 █	Input: Map Vector													█
 █	Output: 															█
 \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(void)
+bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *pose_disturbance)
 {
 	pbl_STU_Pose2DStamped *my_matching_result_ = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	// *my_matching_result_ = *pbl_Publish_Match;
-	my_matching_result_->x = prv_map_center_x_ - 25;
-	my_matching_result_->y = prv_map_center_y_ - 25;
-	my_matching_result_->phi = 0.0;
+	my_matching_result_->x = prv_map_center_x_ - 25 + pose_disturbance->x;
+	my_matching_result_->y = prv_map_center_y_ - 25 + pose_disturbance->y;
+	my_matching_result_->phi = 0.0 + pose_disturbance->phi;
 
 	// cloud form to accelerate
 	prv_STU_CloudMap my_Match_Cloud;
@@ -519,7 +536,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(void)
 			// ------------------------------------------------------
 			//		Find the matching (for a points map)
 			// ------------------------------------------------------
-			printf("%d", local_ICP_Params.nPointOffset);
+			// printf("%d", local_ICP_Params.nPointOffset);
 			my_determineMatching2D(my_Match_Cloud, my_matching_result_, vec_MathingPair, local_ICP_Params);
 
 			if (!vec_MathingPair.size())
@@ -571,6 +588,17 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(void)
 	*pbl_Publish_Match = *my_matching_result_;
 	pbl_MatchingPair = vec_MathingPair;
 
+	//evolution 
+	{
+		float overlap = 100.0 * (float)vec_MathingPair.size() / my_Match_Cloud.x_vec.size();
+		pbl_STU_Pose2DStamped pose_err;
+		pose_err.x = my_matching_result_->x - (prv_map_center_x_ - 25);
+		pose_err.y = my_matching_result_->y - (prv_map_center_y_ - 25);
+		pose_err.phi = my_matching_result_->phi * 180 / M_PI;
+		printf("pose init: %.3f %.3f %.3fdeg\n", pose_disturbance->x, pose_disturbance->y, pose_disturbance->phi * 180 / M_PI);
+		printf("overlap: %.3f%, pose error: %.3f %.3f %.3fdeg\n", overlap, pose_err.x, pose_err.y, pose_err.phi);
+		fprintf(fp_odometry, "%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n", map_sector_1piece.middle_angle, overlap, pose_err.x, pose_err.y, sqrt(pose_err.x * pose_err.x + pose_err.y * pose_err.y), pose_err.phi);
+	}
 }
 
 

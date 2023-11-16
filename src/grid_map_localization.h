@@ -67,6 +67,7 @@ public:
     };
     pbl_STU_Pose2DStamped *pbl_Publish_Match;
     pbl_STU_Pose2DStamped *pbl_Publish_Match_Lasttime;
+    std::vector<pbl_STU_Pose2DStamped> pbl_InitPose_Disturbance;
 
     /*-------------------------------------------------*\
     |	Initialization mode       						|
@@ -282,7 +283,8 @@ private:
 
 public:
     void prv_fnc_CutSectorMap(double middle_angle);
-    bool pbl_fnc_IcpMatch_Map2Map(void);
+    // bool pbl_fnc_IcpMatch_Map2Map(void);
+    bool pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *pose_disturbance);
 
     /*-------------------------------------------------*\
     |	prv_se2_l2                                      |
@@ -305,3 +307,5 @@ public:
 //utm origin
 extern double utm_east;
 extern double utm_north;
+
+extern FILE *fp_odometry;
