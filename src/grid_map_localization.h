@@ -309,3 +309,4 @@ extern double utm_east;
 extern double utm_north;
 
 extern FILE *fp_odometry;
+extern std::vector<double> scores;

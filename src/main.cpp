@@ -27,12 +27,15 @@
 
 #include "grid_map_localization.h"
 
+FILE *fp_score;
+
 int main(int argc, char **argv)
 {
 
     ros::init(argc, argv, "icp_viewer");
     ros::NodeHandle pnh("~");
     CLS_GridMapLocalization *cls_gml = new CLS_GridMapLocalization(pnh);
+
     /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
     █	inputs for ICP                   									█
     \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
@@ -155,7 +158,7 @@ int main(int argc, char **argv)
         // if (nKey == 'w' || nKey == 's')
         // {
 
-
+	fp_score = fopen("/home/w/502D/NewLoc2D_ws/score.txt", "a");
 
     for (int i = 0; i < cls_gml->pbl_InitPose_Disturbance.size(); i++)
     {
@@ -169,6 +172,7 @@ int main(int argc, char **argv)
         OutResultMsg_init.header.frame_id = "map";
         OutResultMsg_init.header.stamp = lfTime;
         publish_disturb->publish(OutResultMsg_init);
+        scores.clear();
 
         for (int j = 0; j < 2 * M_PI / sector_angle_step; j++)
         {
@@ -227,6 +231,11 @@ int main(int argc, char **argv)
 
             // ros::Duration(0.5).sleep();
         }
+
+        int l = std::min_element(scores.begin(), scores.end()) - scores.begin();
+        fprintf(fp_score, "disturb index: %d, best angle: %.1f, score: %f\n", i, l * sector_angle_step * 180 / M_PI, scores[l]);
+        scores.clear();
+
     }
             // if (nKey == 'w')
             //     middle_angle += sector_angle_step;

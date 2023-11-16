@@ -18,6 +18,7 @@ double utm_east = 0.0;
 double utm_north = 0.0;
 // std::vector<float> RWeight;
 FILE *fp_odometry;
+std::vector<double> scores;
 
 /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
 █	Author: Chenxi Yang		Create: 2021.11.09							█
@@ -597,7 +598,11 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *po
 		pose_err.phi = my_matching_result_->phi * 180 / M_PI;
 		printf("pose init: %.3f %.3f %.3fdeg\n", pose_disturbance->x, pose_disturbance->y, pose_disturbance->phi * 180 / M_PI);
 		printf("overlap: %.3f%, pose error: %.3f %.3f %.3fdeg\n", overlap, pose_err.x, pose_err.y, pose_err.phi);
-		fprintf(fp_odometry, "%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n", map_sector_1piece.middle_angle, overlap, pose_err.x, pose_err.y, sqrt(pose_err.x * pose_err.x + pose_err.y * pose_err.y), pose_err.phi);
+		
+		double score = pose_err.x * pose_err.x + pose_err.y * pose_err.y + pose_err.phi * pose_err.phi;
+		scores.push_back(score);
+		fprintf(fp_odometry, "%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.6f\n", map_sector_1piece.middle_angle, overlap, pose_err.x, pose_err.y, sqrt(pose_err.x * pose_err.x + pose_err.y * pose_err.y), pose_err.phi, score);
+
 	}
 }
 
