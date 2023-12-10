@@ -426,7 +426,7 @@ void CLS_GridMapLocalization::prv_fnc_MatchAssessment()
 					tf::Vector3(pbl_Publish_Match_Assessment[j].x, pbl_Publish_Match_Assessment[j].y, 0));
 				tf_broadcaster_1->sendTransform(*assessment_transform);
 				publisher_PointCloud2_Sector->publish(cloud_msg_sector);
-				sleep(0.5);
+				// usleep(100000);
 
 			}
 		double t2 = ros::Time::now().toSec();
