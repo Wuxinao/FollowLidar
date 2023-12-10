@@ -1,7 +1,7 @@
 <launch>
      <arg name="rviz" default="true" />
     <group if="$(arg rviz)">
-        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find icp_viewer)/config/rviz/icp_viewer.rviz" />
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find icp_viewer)/config/rviz/lidar_localization_hexi.rviz" />
     </group>
     
     <arg name="map_env" default="XinaoTest" />
@@ -18,13 +18,13 @@
         <param name="PRMTR_strTopicName_GPS_Heading" type="string" value="/strong/heading" />
 
        
-        <param name="PRMTR_nInitMode" type="int" value="1" />   <!-- value = 0: GPS; value = 1: MANUAL_SETTING; value = 2: MANUAL_UI -->
+        <param name="PRMTR_nInitMode" type="int" value="0" />   <!-- value = 0: GPS; value = 1: MANUAL_SETTING; value = 2: MANUAL_UI -->
         <param name="PRMTR_lfInitPoseX" type="double" value="334685" /> <!--1.334690, 2.334693, 9.334685 10.334698-->
         <param name="PRMTR_lfInitPoseY" type="double" value="2692290" /> <!--1.2692296, 2.2692342, 9.2692290 10.2692345-->
         <param name="PRMTR_lfInitPoseYaw" type="double" value="45" /> <!-- Unit: deg --><!--1.60 2.-80 9.45 10.-95-->
         <param name="PRMTR_lfMaxZ" type="double" value="3" /> <!--5-->
         <param name="PRMTR_lfMinZ" type="double" value="1" /> <!-- 2.5 -->
-        <param name="PRMTR_utmEast" type="double" value="354975" /> <!--334700, 355000, 354975-->
-        <param name="PRMTR_utmNorth" type="double" value="2699975" /> <!-- 2692400, 2700000, 2699975 -->
+        <param name="PRMTR_utmEast" type="double" value="334700" /> <!--334700, 355000, 354975-->
+        <param name="PRMTR_utmNorth" type="double" value="2692400" /> <!-- 2692400, 2700000, 2699975 -->
     </node>
 </launch>

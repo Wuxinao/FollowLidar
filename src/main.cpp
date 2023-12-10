@@ -27,7 +27,185 @@
 
 #include "grid_map_localization.h"
 
+bool isHeadInitial = false;
+bool isGPSInitial = false;
+int  initial_cnt = 3;
+
 FILE *fp_score;
+
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Chenxi Yang		Create: 2021.11.09							█
+█	GPS          							    				    	█
+█	Input:  -															█
+█	Output: -           												█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Subscribe_GPS(const sensor_msgs::NavSatFixConstPtr &fix_msg)
+{
+    if (
+        pbl_List_Initial_Mode == CLS_GridMapLocalization::MODE_Initial_GPS &&
+        pbl_List_Current_Status == CLS_GridMapLocalization::STATUS_INITIAL)
+    {
+        geographic_msgs::GeoPointStampedPtr gps_msg(new geographic_msgs::GeoPointStamped());
+        gps_msg->header = fix_msg->header;
+        gps_msg->position.latitude = fix_msg->latitude;
+        gps_msg->position.longitude = fix_msg->longitude;
+        gps_msg->position.altitude = fix_msg->altitude;
+
+        geodesy::UTMPoint utm_point;
+        geodesy::fromMsg(gps_msg->position, utm_point);
+
+        static int initial_cnt_copy = initial_cnt;
+        // printf("%lf %lf\n", utm_point.easting, utm_point.northing);
+        pbl_Publish_Match->timestamp = fix_msg->header.stamp.toSec();
+
+        if (!initial_cnt_copy)
+        {
+            if (!isGPSInitial)
+            {
+                isGPSInitial = true;
+                pbl_Publish_Match->x /= initial_cnt;
+                pbl_Publish_Match->y /= initial_cnt;
+            }
+        }
+        else
+        {
+            initial_cnt_copy--;
+            pbl_Publish_Match->x += utm_point.easting - utm_east-25;
+            pbl_Publish_Match->y += utm_point.northing - utm_north-25;
+        }
+
+        if (isHeadInitial && isGPSInitial)
+            pbl_List_Current_Status = CLS_GridMapLocalization::STATUS_MATCHING;
+    }
+}
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Chenxi Yang		Create: 2021.11.09							█
+█	GPS heading   							    				        █
+█	Input:  -															█
+█	Output: -           												█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Subscribe_GPS_Head(const cyber_msgs::HeadingConstPtr &heading_msg)
+{
+    // printf("here H!\n");
+    if (
+        pbl_List_Initial_Mode == CLS_GridMapLocalization::MODE_Initial_GPS &&
+        pbl_List_Current_Status == CLS_GridMapLocalization::STATUS_INITIAL)
+    {
+        double yaw = heading_msg->data;
+        if (yaw >= M_PI)
+            yaw -= 2 * M_PI;
+        else if (yaw <= -M_PI)
+            yaw += 2 * M_PI;
+        
+        static int initial_cnt_copy = initial_cnt;
+        if (!initial_cnt_copy)
+        {
+            if (!isHeadInitial)
+            {
+                isHeadInitial = true;
+                pbl_Publish_Match->phi /= initial_cnt;
+            }
+        }
+        else
+        {
+            initial_cnt_copy--;
+            pbl_Publish_Match->phi += yaw;
+            printf("cnt:%d, yaw = %f\n", initial_cnt_copy, yaw);
+        }
+    }
+}
+
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Chenxi Yang		Create: 2021.11.09							█
+█	Point Cloud 							    					    █
+█	Input:  -															█
+█	Output: localization_result											█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Subscribe_PointCloud(const sensor_msgs::PointCloud2ConstPtr &cloud_msg)
+{
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::fromROSMsg(*cloud_msg, *cloud);
+    /*-------------------------------------------------*\
+    |	Cloud filter                   					|
+    \*-------------------------------------------------*/
+    pbl_fnc_CloudFilter(cloud);
+
+    if (pbl_List_Current_Status == CLS_GridMapLocalization::STATUS_MATCHING)
+    {
+        pbl_mutex_isMatching.lock();
+        pbl_Publish_Match->timestamp = cloud_msg->header.stamp.toSec();
+
+        clock_t matching_starttime = clock();
+        double start = ros::Time::now().toSec();
+
+        pbl_fnc_IcpMatch(cloud);
+        double end = ros::Time::now().toSec();
+        // printf("time interval: %f\n", end - start);
+
+        pbl_mutex_isMatching.unlock();
+
+        pbl_Publish_Cloud = cloud;
+        /*-------------------------------------------------*\
+        |	rviz show localization result              		|
+        \*-------------------------------------------------*/
+        nav_msgs::Odometry OutResultMsg;
+        OutResultMsg.pose.pose.position.x = pbl_Publish_Match->x;
+        OutResultMsg.pose.pose.position.y = pbl_Publish_Match->y;
+        OutResultMsg.pose.pose.position.z = 0;
+        OutResultMsg.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(0, 0, pbl_Publish_Match->phi);
+        OutResultMsg.header.frame_id = "map";
+        OutResultMsg.header.stamp = ros::Time().fromSec(pbl_Publish_Match->timestamp);
+        publisher_Odometry_LocalizationResult->publish(OutResultMsg);
+
+        // printf("time interval: %lf\n", pbl_fnc_GetTimeInterval(matching_starttime));
+
+    }
+}
+
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Chenxi Yang		Create: 2021.11.09							█
+█	Publish point cloud     						   					█
+█	Input:  -															█
+█	Output: -           												█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Publish_PointCloud(const ros::TimerEvent &)
+{
+    
+    if (pbl_Publish_Match != nullptr)
+    {
+        registered_transform->stamp_ = ros::Time().fromSec(pbl_Publish_Match->timestamp);
+        geometry_msgs::Quaternion quat = tf::createQuaternionMsgFromRollPitchYaw(0, 0,
+                                                                                 pbl_Publish_Match->phi);
+        registered_transform->setRotation(tf::Quaternion(quat.x, quat.y, quat.z, quat.w));
+        registered_transform->setOrigin(
+            tf::Vector3(pbl_Publish_Match->x, pbl_Publish_Match->y, 0));
+        tf_broadcaster->sendTransform(*registered_transform);
+        sensor_msgs::PointCloud2 cloud_msg;
+        pcl::toROSMsg(*pbl_Publish_Cloud, cloud_msg);
+        cloud_msg.header.frame_id = "lidar";
+        cloud_msg.header.stamp = ros::Time().fromSec(pbl_Publish_Match->timestamp);
+        publisher_PointCloud2_Lidar->publish(cloud_msg);
+    }
+}
+
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Chenxi Yang		Create: 2021.11.09							█
+█	Publish grid map         						   					█
+█	Input:  -															█
+█	Output: -           												█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Publish_GridMap(const ros::TimerEvent &)
+{
+    // nav_msgs::OccupancyGrid map_msg;
+    pbl_mutex_isMatching.lock();
+    if (pbl_GridMap2D.info.width != 0)
+    {
+        publisher_OccupancyGrid_Map->publish(pbl_GridMap2D);
+    }
+    pbl_mutex_isMatching.unlock();
+}
+
+
 
 int main(int argc, char **argv)
 {
@@ -36,238 +214,8 @@ int main(int argc, char **argv)
     ros::NodeHandle pnh("~");
     CLS_GridMapLocalization *cls_gml = new CLS_GridMapLocalization(pnh);
 
-    /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
-    █	inputs for ICP                   									█
-    \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-    pcl::PointCloud<pcl::PointXYZ>::Ptr ent_cloud(new pcl::PointCloud<pcl::PointXYZ>());
-    // nav_msgs::OccupancyGrid GridMap2D;
-
-    /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
-    █	TF                                 									█
-    \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-    tf::TransformBroadcaster *tf_broadcaster = new tf::TransformBroadcaster;
-    tf::StampedTransform *registered_transform = new tf::StampedTransform;
-    registered_transform->frame_id_ = "map";
-    registered_transform->child_frame_id_ = "lidar";
-
-    /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
-    █	Load Pointcloud and GPS        										█
-    \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-#pragma region Load Pointcloud and GPS
-
-    /*-------------------------------------------------*\
-    |	input bag                               		|
-    \*-------------------------------------------------*/
-    std::string strMapFile;
-    pnh.param<std::string>("PRMTR_strMapFile", strMapFile, "");
-    std::string input_bag_file = strMapFile;
-
-    rosbag::Bag input_bag;
-    input_bag.open(input_bag_file, rosbag::bagmode::Read);
-
-    rosbag::View view(input_bag);
-
-    /*-------------------------------------------------*\
-    |	load bag                                  		|
-    \*-------------------------------------------------*/
-    bool isFirstCloud = true;
-    bool isFirstGPS = true;
-    bool isFirstHeading = true;
-    for (const rosbag::MessageInstance &m : view)
-    {
-        // if (m.getTopic() == "/driver/livox/point_cloud" && isFirstCloud)
-        // {
-        //     sensor_msgs::PointCloud2::Ptr point_msg = m.instantiate<sensor_msgs::PointCloud2>();
-
-        //     pcl::fromROSMsg(*point_msg, *ent_cloud);
-        //     printf("%d\n", ent_cloud->points.size());
-        //     isFirstCloud = false;
-        // }
-        if (m.getTopic() == "/driver/gps/fix" && isFirstGPS)
-        {
-            sensor_msgs::NavSatFix::Ptr gps_msg = m.instantiate<sensor_msgs::NavSatFix>();
-            geographic_msgs::GeoPointStampedPtr geo_msg(new geographic_msgs::GeoPointStamped());
-            geo_msg->header = gps_msg->header;
-            geo_msg->position.latitude = gps_msg->latitude;
-            geo_msg->position.longitude = gps_msg->longitude;
-            geo_msg->position.altitude = gps_msg->altitude;
-
-            geodesy::UTMPoint utm_point;
-            geodesy::fromMsg(geo_msg->position, utm_point);
-            cls_gml->pbl_Publish_Match->timestamp = gps_msg->header.stamp.toSec();
-            // cls_gml->pbl_Publish_Match->x = utm_point.easting - 355000;
-            // cls_gml->pbl_Publish_Match->y = utm_point.northing - 2700000;
-            cls_gml->pbl_Publish_Match->x = utm_point.easting - 334700;
-            cls_gml->pbl_Publish_Match->y = utm_point.northing - 2692400;
-
-            isFirstGPS = false;
-        }
-        // else if (m.getTopic() == "/strong/heading" && isFirstHeading)
-        // {
-        //     cyber_msgs::Heading::Ptr heading_msg = m.instantiate<cyber_msgs::Heading>();
-        //     double yaw = heading_msg->data;
-        //     if (yaw >= M_PI)
-        //         yaw -= 2 * M_PI;
-        //     else if (yaw <= -M_PI)
-        //         yaw += 2 * M_PI;
-        //     cls_gml->pbl_Publish_Match->phi = yaw + 0.05;
-        //     isFirstHeading = false;
-        // }
-    }
-#pragma endregion
-
-    /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
-    █	Generate Localmap              										█
-    \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-    ros::Time lfTime = ros::Time::now();
-
-    /*-------------------------------------------------*\
-    |	Map                                      		|
-    \*-------------------------------------------------*/
-    cls_gml->prv_fnc_UpdateGridMap();
-    // ros::Publisher *publish_map = new ros::Publisher(pnh.advertise<nav_msgs::OccupancyGrid>("grid_map_new", 1));
-    // publish_map->publish(cls_gml->pbl_GridMap2D);
-
-
-    // /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
-    // █	Visualization               										█
-    // \*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
-    // /*-------------------------------------------------*\
-    // |	GUI                                        		|
-    // \*-------------------------------------------------*/
-    // cv::Mat im3Src = cv::Mat::zeros(cv::Size(200, 100), CV_8UC3);
-    // cv::imshow("Control", im3Src);
-    // int nKey = 0;
-    // int nIter = 2;
-    // int nIterLast = -1;
-
-	double sector_angle_step = 5 * M_PI / 180;
-    double middle_angle = 0.0;
-
-    // while (nKey != 'q')
-    // {
-        // nKey = cv::waitKey(30);
-        // if (nKey == 'a' && nIter > 0)
-        // {
-        //     nIter--;
-        // }
-        // else if (nKey == 'd' && nIter < (int)cls_gml->pbl_vec_Yang_MatchResult.size()-1)
-        // {
-        //     nIter++;
-        // }
-        // if (nKey == 'w' || nKey == 's')
-        // {
-
-	fp_score = fopen("/home/w/502D/NewLoc2D_ws/score.txt", "a");
-
-    for (int i = 0; i < cls_gml->pbl_InitPose_Disturbance.size(); i++)
-    {
-        //publish initial pose (disturbed)
-        ros::Publisher *publish_disturb = new ros::Publisher(pnh.advertise<nav_msgs::Odometry>("map_matching_result/utm_new_disturb", 5));
-        nav_msgs::Odometry OutResultMsg_init;
-        OutResultMsg_init.pose.pose.position.x = cls_gml->pbl_InitPose_Disturbance[i].x + (cls_gml->prv_map_center_x_ - 25);
-        OutResultMsg_init.pose.pose.position.y = cls_gml->pbl_InitPose_Disturbance[i].y + (cls_gml->prv_map_center_y_ - 25);
-        OutResultMsg_init.pose.pose.position.z = 0;
-        OutResultMsg_init.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(0, 0, cls_gml->pbl_InitPose_Disturbance[i].phi);
-        OutResultMsg_init.header.frame_id = "map";
-        OutResultMsg_init.header.stamp = lfTime;
-        publish_disturb->publish(OutResultMsg_init);
-        scores.clear();
-
-        for (int j = 0; j < 2 * M_PI / sector_angle_step; j++)
-        {
-            middle_angle = j * sector_angle_step;
-            cls_gml->prv_fnc_CutSectorMap(middle_angle);
-            fprintf(fp_odometry, "%d\t", i);
-            cls_gml->pbl_fnc_IcpMatch_Map2Map(&(cls_gml->pbl_InitPose_Disturbance[i]));
-    
-            /*-------------------------------------------------*\
-            |	Pointcloud_sector                        		|
-            \*-------------------------------------------------*/
-            ros::Publisher *publish_PointCloud2_Lidar_Sector;
-            publish_PointCloud2_Lidar_Sector = new ros::Publisher(pnh.advertise<sensor_msgs::PointCloud2>("registered_cloud_sector", 1));
-
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sector(new pcl::PointCloud<pcl::PointXYZ>());
-            // cloud_sector->points.resize(cls_gml->pbl_MatchingPair.size()+400); //marker
-            cloud_sector->points.resize(cls_gml->pbl_MatchingPair.size());
-            for (int i = 0; i < cls_gml->pbl_MatchingPair.size(); i++)
-            {
-                cloud_sector->points[i].x = cls_gml->pbl_MatchingPair[i].Cld_x;
-                cloud_sector->points[i].y = cls_gml->pbl_MatchingPair[i].Cld_y;
-                cloud_sector->points[i].z = cls_gml->pbl_MatchingPair[i].Cld_z;
-            }
-            sensor_msgs::PointCloud2 cloud_msg_sector;
-            pcl::toROSMsg(*cloud_sector, cloud_msg_sector);
-            cloud_msg_sector.header.frame_id = "lidar";
-            cloud_msg_sector.header.stamp = lfTime;
-
-            registered_transform->stamp_ = lfTime;
-            geometry_msgs::Quaternion quat = tf::createQuaternionMsgFromRollPitchYaw(0, 0, cls_gml->pbl_Publish_Match->phi); // Yaw
-            // printf("phi = %.3f\n", cls_gml->pbl_Publish_Match->phi * 180 / M_PI);
-            registered_transform->setRotation(tf::Quaternion(quat.x, quat.y, quat.z, quat.w));
-            registered_transform->setOrigin(
-                tf::Vector3(cls_gml->pbl_Publish_Match->x, cls_gml->pbl_Publish_Match->y, 0));
-            
-            tf_broadcaster->sendTransform(*registered_transform);
-            // publish_PointCloud2_Lidar->publish(cloud_msg);
-            // publish_PointCloud2_Lidar_Matched->publish(cloud_msg_matched);
-            publish_PointCloud2_Lidar_Sector->publish(cloud_msg_sector);   
-
-            /*-------------------------------------------------*\
-            |	Odometry                                 		|
-            \*-------------------------------------------------*/
-            ros::Publisher *publish_odom_result = new ros::Publisher(pnh.advertise<nav_msgs::Odometry>("map_matching_result/utm_new", 5));
-            nav_msgs::Odometry OutResultMsg;
-            OutResultMsg.pose.pose.position.x = cls_gml->pbl_Publish_Match->x;
-            OutResultMsg.pose.pose.position.y = cls_gml->pbl_Publish_Match->y;
-            OutResultMsg.pose.pose.position.z = 0;
-            OutResultMsg.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(0, 0, cls_gml->pbl_Publish_Match->phi);
-            OutResultMsg.header.frame_id = "map";
-            OutResultMsg.header.stamp = lfTime;
-            publish_odom_result->publish(OutResultMsg);
-
-            ros::Publisher *publish_map = new ros::Publisher(pnh.advertise<nav_msgs::OccupancyGrid>("grid_map_new", 1));
-            publish_map->publish(cls_gml->pbl_GridMap2D);
-
-            // ros::Duration(0.5).sleep();
-        }
-
-        int l = std::min_element(scores.begin(), scores.end()) - scores.begin();
-        fprintf(fp_score, "disturb index: %d, best angle: %.1f, score: %f\n", i, l * sector_angle_step * 180 / M_PI, scores[l]);
-        scores.clear();
-
-    }
-            // if (nKey == 'w')
-            //     middle_angle += sector_angle_step;
-            // else
-            //     middle_angle -= sector_angle_step;
-
-            // if (middle_angle > 2 * M_PI - sector_angle_step + 1e-5)
-            // {
-            //     middle_angle -= 2 * M_PI;
-            // }
-            // if (middle_angle < 0 - 1e-5)   //0-355 deg
-            // {
-            //     middle_angle += 2 * M_PI;
-            // }
-            // cls_gml->prv_fnc_CutSectorMap(middle_angle);
-            // cls_gml->pbl_fnc_IcpMatch_Map2Map(cls_gml->pbl_InitPose_Disturbance[i]);
-
-
-            // for (int i = 0; i < 20; i++)     //marker
-            // {
-            //     for (int j = 0; j < 20; j++)
-            //     {
-            //         cloud_sector->points[cls_gml->pbl_MatchingPair.size() + i * 20 + j].x = i * 1.0 / 10;
-            //         cloud_sector->points[cls_gml->pbl_MatchingPair.size() + i * 20 + j].y = j * 1.0 / 10;
-            //         cloud_sector->points[cls_gml->pbl_MatchingPair.size() + i * 20 + j].z = 0;
-            //     }
-            // }
-
-        // }
-
-        // publish_GridCells_Map_Matched->publish(pbl_GridCells_Map_Matched);
-    // }
+    ros::MultiThreadedSpinner spinner(0);
+    spinner.spin();
 
     return 0;
 }

@@ -19,6 +19,8 @@ double utm_north = 0.0;
 // std::vector<float> RWeight;
 FILE *fp_odometry;
 std::vector<double> scores;
+ros::Timer map_publishing_timer;
+ros::Timer point_cloud_publishing_timer;
 
 /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
 █	Author: Chenxi Yang		Create: 2021.11.09							█
@@ -39,7 +41,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	pbl_Publish_Match = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Match_Lasttime = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
-	fp_odometry = fopen("/home/w/502D/NewLoc2D_ws/odometry.txt", "a");
+	// fp_odometry = fopen("/home/w/502D/NewLoc2D_ws/odometry.txt", "a");
 
 	// init pose disturbance
 	pbl_InitPose_Disturbance.clear();
@@ -85,26 +87,66 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 
 	int nInitialMode;
 	ent_pnh.param<int>("PRMTR_nInitMode", nInitialMode, 0);
-
 	pbl_List_Initial_Mode = static_cast<CLS_GridMapLocalization::pbl_LIST_Initialization_MODE>(nInitialMode);
+
+	/*-------------------------------------------------*\
+    |	Subscribers		                         		|
+    \*-------------------------------------------------*/
+    subscriber_lidar = ent_pnh.subscribe<sensor_msgs::PointCloud2>(pbl_strTopicName_Cloud.c_str(), 1, &CLS_GridMapLocalization::Callback_Subscribe_PointCloud, this);
+    subscriber_gps = ent_pnh.subscribe<sensor_msgs::NavSatFix>(pbl_strTopicName_Gps.c_str(), 1000, &CLS_GridMapLocalization::Callback_Subscribe_GPS, this);
+    subscriber_gps_yaw = ent_pnh.subscribe<cyber_msgs::Heading>(pbl_strTopicName_Gps_Heading, 1, &CLS_GridMapLocalization::Callback_Subscribe_GPS_Head, this);
 	
+	/*-------------------------------------------------*\
+    |	Publishers and TF                         		|
+    \*-------------------------------------------------*/
+	publisher_PointCloud2_Sector = new ros::Publisher(ent_pnh.advertise<sensor_msgs::PointCloud2>("registered_cloud_sector", 1));
+	publisher_PointCloud2_Lidar = new ros::Publisher(ent_pnh.advertise<sensor_msgs::PointCloud2>("registered_cloud", 1));
+    publisher_OccupancyGrid_Map = new ros::Publisher(ent_pnh.advertise<nav_msgs::OccupancyGrid>("grid_map", 1));
+    publisher_Odometry_AssessResult = new ros::Publisher(ent_pnh.advertise<nav_msgs::Odometry>("assessment_result", 5));
+    publisher_Odometry_LocalizationResult = new ros::Publisher(ent_pnh.advertise<nav_msgs::Odometry>("localization_result", 5));
+
+	tf_broadcaster = new tf::TransformBroadcaster;
+	tf_broadcaster_1 = new tf::TransformBroadcaster;
+    registered_transform = new tf::StampedTransform;
+	registered_transform->frame_id_ = "map";
+    registered_transform->child_frame_id_ = "lidar";
+    assessment_transform = new tf::StampedTransform;
+	assessment_transform->frame_id_ = "map";
+	assessment_transform->child_frame_id_ = "assess";
+
+
+	/*-------------------------------------------------*\
+    |	Publish Grid Map                          		|
+    \*-------------------------------------------------*/
+    map_publishing_timer = ent_pnh.createTimer(ros::Duration(1), &CLS_GridMapLocalization::Callback_Publish_GridMap, this);
+
+    /*-------------------------------------------------*\
+    |	Publish Point Cloud                        		|
+    \*-------------------------------------------------*/
+    point_cloud_publishing_timer = ent_pnh.createTimer(ros::Duration(0.05), &CLS_GridMapLocalization::Callback_Publish_PointCloud, this);
+
 	/*-------------------------------------------------*\
 	|	Update map                 	    				|
 	\*-------------------------------------------------*/
-	//prv_thread_MapUpdate = std::thread(&CLS_GridMapLocalization::prv_fnc_UpdateGridMap, this);
+	prv_thread_MapUpdate = std::thread(&CLS_GridMapLocalization::prv_fnc_UpdateGridMap, this);
+
+	/*-------------------------------------------------*\
+	|	Match Assessment            	    			|
+	\*-------------------------------------------------*/
+	pbl_thread_MatchAssessment = std::thread(&CLS_GridMapLocalization::prv_fnc_MatchAssessment, this);
 
 	/*-------------------------------------------------*\
 	|	ICP parameters            	    				|
 	\*-------------------------------------------------*/
 	// fixed parameters
-	prv_ICP_Params_Fixed.nMaxIterations = 40;
+	prv_ICP_Params_Fixed.nMaxIterations = 25;
 	prv_ICP_Params_Fixed.nPointDecimation = 6; //12
 	prv_ICP_Params_Fixed.fMinAbsStep_trans = 1e-2f; // 1e-6f;
 	prv_ICP_Params_Fixed.fMinAbsStep_rot = 1e-3f;	// 1e-6f;
-	prv_ICP_Params_Fixed.fShrinkRatio = 0.3f;
-	prv_ICP_Params_Fixed.fMinThresholdDist = 0.5f;
+	prv_ICP_Params_Fixed.fShrinkRatio = 0.5f;
+	prv_ICP_Params_Fixed.fMinThresholdDist = 0.1f;
 	// dynamic parameters
-	prv_ICP_Params_Dynamic.fMaxDistForCorres = 5.0f;//0.75;//0.1f;		   // options_thresholdDist;
+	prv_ICP_Params_Dynamic.fMaxDistForCorres = 0.75f;//0.75;//0.1f;		   // options_thresholdDist;
 	prv_ICP_Params_Dynamic.fMaxAnglForCorres = DEG2RAD(0.15f); // options_thresholdAng;
 	prv_ICP_Params_Dynamic.nPointOffset = 0;
 }
@@ -204,99 +246,113 @@ void CLS_GridMapLocalization::prv_fnc_UpdateGridMap()
 	int prv_m_map_size_ = 5;
 	unsigned prv_square_size_ = 50;
 	double prv_map_resolution_ = 0.1; //
-
-	int map_center_x_new = prv_square_size_ * ceil((float(pbl_Publish_Match->x) - float(prv_square_size_) / 2) / float(prv_square_size_));
-	int map_center_y_new = prv_square_size_ * ceil((float(pbl_Publish_Match->y) - float(prv_square_size_) / 2) / float(prv_square_size_));
-
-	prv_map_center_x_ = map_center_x_new;
-	prv_map_center_y_ = map_center_y_new;
-	std::cout << "[INFO] Map center changed to (" << prv_map_center_x_ << "," << prv_map_center_y_ << ")."
-			  << std::endl;
-
-	// 读以center为中心的n×n的图
-	float x_min = prv_map_center_x_ - float(prv_square_size_) / 2 * float(prv_m_map_size_);
-	float x_max = prv_map_center_x_ + float(prv_square_size_) / 2 * float(prv_m_map_size_);
-	float y_min = prv_map_center_y_ - float(prv_square_size_) / 2 * float(prv_m_map_size_);
-	float y_max = prv_map_center_y_ + float(prv_square_size_) / 2 * float(prv_m_map_size_);
-	int image_size_ = int(float(prv_square_size_) / prv_map_resolution_);
-
-	// mrpt::maps::COccupancyGridMap2D *ogm = new mrpt::maps::COccupancyGridMap2D;
-	// ogm->setSize(x_min, x_max, y_min, y_max, prv_map_resolution_);
-
-	nav_msgs::OccupancyGrid my_ogm;
-	my_ogm.header.frame_id = "map";
-
-	my_ogm.info.width = std::round((x_max - x_min) / prv_map_resolution_);
-	my_ogm.info.height = std::round((y_max - y_min) / prv_map_resolution_);
-	my_ogm.info.resolution = prv_map_resolution_;
-
-	my_ogm.info.origin.position.x = x_min;
-	my_ogm.info.origin.position.y = y_min;
-	my_ogm.info.origin.position.z = 0;
-
-	my_ogm.info.origin.orientation.x = 0;
-	my_ogm.info.origin.orientation.y = 0;
-	my_ogm.info.origin.orientation.z = 0;
-	my_ogm.info.origin.orientation.w = 1;
-
-	my_ogm.data.resize(my_ogm.info.width * my_ogm.info.height);
-
-	int image_around_num = 0;
-	clock_t map_loading_start_time = clock();
-
-	// #pragma omp parallel for
-	for (int i = 0; i < prv_m_map_size_; ++i)
+	while (true)
 	{
-		//  //          #pragma omp parallel for
-		for (int j = 0; j < prv_m_map_size_; ++j)
+		usleep(100000);
+
+		if (pbl_List_Current_Status != STATUS_MATCHING)
 		{
-			int new_center_x = prv_map_center_x_ + prv_square_size_ * (i - prv_m_map_size_ / 2);
-			int new_center_y = prv_map_center_y_ + prv_square_size_ * (j - prv_m_map_size_ / 2);
-
-			// mrpt::utils::CImage image_in;
-			// image_in.
-			bool isMap = false;
-			int nMapSelected = 0;
-			for (int nMapIndex = 0; nMapIndex < pbl_vec_Gridmap.size(); nMapIndex++)
-			{
-				if (pbl_vec_Gridmap[nMapIndex].pntOrigin == cv::Point2i(new_center_x, new_center_y))
-				{
-					nMapSelected = nMapIndex;
-					isMap = true;
-					break;
-				}
-			}
-			if (isMap)
-			{
-				for (int nPnt = 0; nPnt < pbl_vec_Gridmap[nMapSelected].set_pntXYI.size(); nPnt++)
-				{
-					int square_index_x = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].x + i * image_size_;
-					int square_index_y = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].y + j * image_size_;
-					// float square_index_value = prv_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].fValue;
-					char square_index_value_4show = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].nValue;
-					// ogm->setCell(square_index_x,
-					// 			 square_index_y,
-					// 			 square_index_value);
-					// my_ogm_show.data[my_ogm_show.info.height * square_index_y + square_index_x] = (1.0 - square_index_value) * 100.0;
-					my_ogm.data[my_ogm.info.height * square_index_y + square_index_x] = 80; // square_index_value_4show;
-					// printf("%d ",square_index_value_4show);
-				}
-				image_around_num++;
-			}
+			continue;
 		}
+		
+		int map_center_x_new = prv_square_size_ * ceil((float(pbl_Publish_Match->x) - float(prv_square_size_) / 2) / float(prv_square_size_));
+		int map_center_y_new = prv_square_size_ * ceil((float(pbl_Publish_Match->y) - float(prv_square_size_) / 2) / float(prv_square_size_));
+		
+		if (prv_map_center_x_ != map_center_x_new || prv_map_center_y_ != map_center_y_new)
+		{
+			prv_map_center_x_ = map_center_x_new;
+			prv_map_center_y_ = map_center_y_new;
+			std::cout << "[INFO] Map center changed to (" << prv_map_center_x_ << "," << prv_map_center_y_ << ")."
+					<< std::endl;
+
+			// 读以center为中心的n×n的图
+			float x_min = prv_map_center_x_ - float(prv_square_size_) / 2 * float(prv_m_map_size_);
+			float x_max = prv_map_center_x_ + float(prv_square_size_) / 2 * float(prv_m_map_size_);
+			float y_min = prv_map_center_y_ - float(prv_square_size_) / 2 * float(prv_m_map_size_);
+			float y_max = prv_map_center_y_ + float(prv_square_size_) / 2 * float(prv_m_map_size_);
+			int image_size_ = int(float(prv_square_size_) / prv_map_resolution_);
+
+			// mrpt::maps::COccupancyGridMap2D *ogm = new mrpt::maps::COccupancyGridMap2D;
+			// ogm->setSize(x_min, x_max, y_min, y_max, prv_map_resolution_);
+
+			nav_msgs::OccupancyGrid my_ogm;
+			my_ogm.header.frame_id = "map";
+
+			my_ogm.info.width = std::round((x_max - x_min) / prv_map_resolution_);
+			my_ogm.info.height = std::round((y_max - y_min) / prv_map_resolution_);
+			my_ogm.info.resolution = prv_map_resolution_;
+
+			my_ogm.info.origin.position.x = x_min;
+			my_ogm.info.origin.position.y = y_min;
+			my_ogm.info.origin.position.z = 0;
+
+			my_ogm.info.origin.orientation.x = 0;
+			my_ogm.info.origin.orientation.y = 0;
+			my_ogm.info.origin.orientation.z = 0;
+			my_ogm.info.origin.orientation.w = 1;
+
+			my_ogm.data.resize(my_ogm.info.width * my_ogm.info.height);
+
+			int image_around_num = 0;
+			clock_t map_loading_start_time = clock();
+
+			// #pragma omp parallel for
+			for (int i = 0; i < prv_m_map_size_; ++i)
+			{
+				//  //          #pragma omp parallel for
+				for (int j = 0; j < prv_m_map_size_; ++j)
+				{
+					int new_center_x = prv_map_center_x_ + prv_square_size_ * (i - prv_m_map_size_ / 2);
+					int new_center_y = prv_map_center_y_ + prv_square_size_ * (j - prv_m_map_size_ / 2);
+
+					// mrpt::utils::CImage image_in;
+					// image_in.
+					bool isMap = false;
+					int nMapSelected = 0;
+					for (int nMapIndex = 0; nMapIndex < pbl_vec_Gridmap.size(); nMapIndex++)
+					{
+						if (pbl_vec_Gridmap[nMapIndex].pntOrigin == cv::Point2i(new_center_x, new_center_y))
+						{
+							nMapSelected = nMapIndex;
+							isMap = true;
+							break;
+						}
+					}
+					if (isMap)
+					{
+						for (int nPnt = 0; nPnt < pbl_vec_Gridmap[nMapSelected].set_pntXYI.size(); nPnt++)
+						{
+							int square_index_x = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].x + i * image_size_;
+							int square_index_y = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].y + j * image_size_;
+							// float square_index_value = prv_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].fValue;
+							char square_index_value_4show = pbl_vec_Gridmap[nMapSelected].set_pntXYI[nPnt].nValue;
+							// ogm->setCell(square_index_x,
+							// 			 square_index_y,
+							// 			 square_index_value);
+							// my_ogm_show.data[my_ogm_show.info.height * square_index_y + square_index_x] = (1.0 - square_index_value) * 100.0;
+							my_ogm.data[my_ogm.info.height * square_index_y + square_index_x] = 80; // square_index_value_4show;
+							// printf("%d ",square_index_value_4show);
+						}
+						image_around_num++;
+					}
+				}
+			}
+
+			std::cout << "[INFO] Map loading time: " << pbl_fnc_GetTimeInterval(map_loading_start_time) * 1000 << " ms."
+					<< std::endl; // Map loading timer ends, unit s->ms
+
+			if (image_around_num < prv_m_map_size_ * prv_m_map_size_ / 2)
+			{
+				std::cout << "[WARN] Not enough map image data." << std::endl;
+			}
+
+			pbl_mutex_isMatching.lock();
+			pbl_GridMap2D = my_ogm;
+			pbl_mutex_isMatching.unlock();
+		}
+
 	}
 
-	std::cout << "[INFO] Map loading time: " << pbl_fnc_GetTimeInterval(map_loading_start_time) * 1000 << " ms."
-			  << std::endl; // Map loading timer ends, unit s->ms
-
-	if (image_around_num < prv_m_map_size_ * prv_m_map_size_ / 2)
-	{
-		std::cout << "[WARN] Not enough map image data." << std::endl;
-	}
-
-	// pbl_GridMap2D = ogm;
-	pbl_GridMap2D = my_ogm;
-	// printf("here! %d \n",prv_m_map_size_);
 }
 
 /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
@@ -309,6 +365,86 @@ void CLS_GridMapLocalization::prv_fnc_UpdateGridMap_NewTest()
 {
 
 
+}
+
+void CLS_GridMapLocalization::prv_fnc_MatchAssessment()
+{
+	while (!isGPSInitial || pbl_GridMap2D.info.width == 0);
+	double sector_angle_step = 5 * M_PI / 180;
+    double middle_angle = 0.0;
+
+	while (true)
+	{
+		// sleep(5);
+		pbl_mutex_isMatching.lock();
+		*pbl_Publish_Match_Lasttime = *pbl_Publish_Match;
+		pbl_mutex_isMatching.unlock();
+		ros::Time timeStamp = ros::Time(pbl_Publish_Match_Lasttime->timestamp);
+		double t1 = ros::Time::now().toSec();
+
+		//record of all assess results(360 deg)
+		scores.clear();
+		pbl_Publish_Match_Assessment.clear();
+
+		// for (int i = 0; i < pbl_InitPose_Disturbance.size(); i++)
+		// {
+		
+			for (int j = 0; j < 2 * M_PI / sector_angle_step; j++)
+			{
+				// timeStamp = ros::Time::now();
+				middle_angle = j * sector_angle_step;
+				prv_fnc_CutSectorMap(middle_angle);
+				// fprintf(fp_odometry, "%d\t", i);
+				// printf("%d\t", 4);
+				pbl_fnc_IcpMatch_Map2Map(&(pbl_InitPose_Disturbance[4]));
+				pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sector(new pcl::PointCloud<pcl::PointXYZ>());
+				cloud_sector->points.resize(pbl_MatchingPair.size() + 25);
+				for (int i = 0; i < pbl_MatchingPair.size(); i++)
+				{
+					cloud_sector->points[i].x = pbl_MatchingPair[i].Cld_x;
+					cloud_sector->points[i].y = pbl_MatchingPair[i].Cld_y;
+					cloud_sector->points[i].z = pbl_MatchingPair[i].Cld_z;
+				}
+				for (int i = pbl_MatchingPair.size(); i < pbl_MatchingPair.size() + 25; i++)
+				{
+					cloud_sector->points[i].x = (i - pbl_MatchingPair.size()) / 5;
+					cloud_sector->points[i].x /= 10.0;
+					cloud_sector->points[i].y = (i - pbl_MatchingPair.size()) % 5;
+					cloud_sector->points[i].y /= 10.0;
+					cloud_sector->points[i].z = 0;
+				}
+				//publish map sector
+				sensor_msgs::PointCloud2 cloud_msg_sector;
+				pcl::toROSMsg(*cloud_sector, cloud_msg_sector);
+				cloud_msg_sector.header.frame_id = "assess";
+				cloud_msg_sector.header.stamp = timeStamp;
+
+				assessment_transform->stamp_ = timeStamp;
+				geometry_msgs::Quaternion quat = tf::createQuaternionMsgFromRollPitchYaw(0, 0, pbl_Publish_Match_Assessment[j].phi); // Yaw
+				assessment_transform->setRotation(tf::Quaternion(quat.x, quat.y, quat.z, quat.w));
+				assessment_transform->setOrigin(
+					tf::Vector3(pbl_Publish_Match_Assessment[j].x, pbl_Publish_Match_Assessment[j].y, 0));
+				tf_broadcaster_1->sendTransform(*assessment_transform);
+				publisher_PointCloud2_Sector->publish(cloud_msg_sector);
+				sleep(0.5);
+
+			}
+		double t2 = ros::Time::now().toSec();
+		// printf("assess finish. time cost: %fs\n", t2 - t1);
+		// }
+
+		//publish best orientation
+		int best_score_idx = std::min_element(scores.begin(), scores.end()) - scores.begin();
+        nav_msgs::Odometry OdomMsg_AssessResult;
+        OdomMsg_AssessResult.pose.pose.position.x = pbl_Publish_Match_Assessment[best_score_idx].x;
+        OdomMsg_AssessResult.pose.pose.position.y = pbl_Publish_Match_Assessment[best_score_idx].y;
+        OdomMsg_AssessResult.pose.pose.position.z = 0;
+        OdomMsg_AssessResult.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(0, 0, best_score_idx * sector_angle_step);
+        OdomMsg_AssessResult.header.frame_id = "map";
+        OdomMsg_AssessResult.header.stamp = timeStamp;
+        publisher_Odometry_AssessResult->publish(OdomMsg_AssessResult);
+
+	}
 }
 
 void CLS_GridMapLocalization::prv_fnc_CutSectorMap(double middle_angle)
@@ -327,15 +463,13 @@ void CLS_GridMapLocalization::prv_fnc_CutSectorMap(double middle_angle)
 		map_sector_1piece.end_angle = middle_angle + sector_angle_range / 2;
 		for (int nMap = 0; nMap < pbl_vec_Gridmap.size(); nMap++)
 		{
-			// double mappnt_x_to_center = pbl_vec_Gridmap[nMap].pntOrigin.x - prv_map_center_x_;
-			// double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - prv_map_center_y_;
-			// if (mappnt_x_to_center * cos(map_sector_1piece.middle_angle) + mappnt_y_to_center * sin(map_sector_1piece.middle_angle) < -1e-5) //dot product
-
 			for (int nPnt = 0; nPnt < pbl_vec_Gridmap[nMap].set_pntXYI.size(); nPnt+=5)	//downsample
 			{
-				double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - prv_map_center_y_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].y * prv_map_resolution_;
-				double mappnt_x_to_center = pbl_vec_Gridmap[nMap].pntOrigin.x - prv_map_center_x_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].x * prv_map_resolution_;
-				if (sqrt(pow(mappnt_x_to_center, 2) + pow(mappnt_y_to_center, 2)) > 30)	//consider points in 80m
+				// double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - prv_map_center_y_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].y * prv_map_resolution_;
+				// double mappnt_x_to_center = pbl_vec_Gridmap[nMap].pntOrigin.x - prv_map_center_x_ + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].x * prv_map_resolution_;
+				double mappnt_y_to_center = pbl_vec_Gridmap[nMap].pntOrigin.y - pbl_Publish_Match_Lasttime->y + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].y * prv_map_resolution_;
+				double mappnt_x_to_center = pbl_vec_Gridmap[nMap].pntOrigin.x - pbl_Publish_Match_Lasttime->x + pbl_vec_Gridmap[nMap].set_pntXYI[nPnt].x * prv_map_resolution_;
+				if (pow(mappnt_x_to_center, 2) + pow(mappnt_y_to_center, 2) > 80 * 80)	//consider points in 30m
 					continue;
 				double mappnt_angle_to_center = atan2(mappnt_y_to_center, mappnt_x_to_center);
 				if (Check_Point_In_Sector(mappnt_angle_to_center))
@@ -346,7 +480,7 @@ void CLS_GridMapLocalization::prv_fnc_CutSectorMap(double middle_angle)
 				}
 			}
 		}
-		// printf("sector cut finish. num of points in sector: %d\n", map_sector_1piece.map_sector_data.x_vec.size());
+		printf("sector cut finish. middle angle: %.2f, num of points in sector: %d\n", middle_angle * 180 / M_PI, map_sector_1piece.map_sector_data.x_vec.size());
 
 	// }
 }
@@ -442,7 +576,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 				//  ----------------------------------------------------------------------
 				keepApproaching = true;
 				prv_se2_l2(vec_MathingPair, my_matching_result_);
-				n_vec_PointOffset.push_back(local_ICP_Params.nPointOffset);
+				// n_vec_PointOffset.push_back(local_ICP_Params.nPointOffset);
 				// If matching has not changed, decrease the thresholds:
 				if (!(fabs(my_lastMeanPose->x - my_matching_result_->x) > prv_ICP_Params_Fixed.fMinAbsStep_trans ||
 					  fabs(my_lastMeanPose->y - my_matching_result_->y) > prv_ICP_Params_Fixed.fMinAbsStep_trans ||
@@ -475,9 +609,10 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 		} while ((keepApproaching && outInfo_nIterations < prv_ICP_Params_Fixed.nMaxIterations) ||
 				 (outInfo_nIterations >= prv_ICP_Params_Fixed.nMaxIterations && local_ICP_Params.fMaxDistForCorres > prv_ICP_Params_Fixed.fMinThresholdDist));
 	} // end of "if m2 is not empty"
-	nStep = prv_ICP_Params_Fixed.nPointDecimation;
+	// nStep = prv_ICP_Params_Fixed.nPointDecimation;
 	*pbl_Publish_Match = *my_matching_result_;
-	pbl_MatchingPair = vec_MathingPair;
+	printf("cloud size: %d, matching pair: %d.\n", ent_cloud->points.size(), vec_MathingPair.size());
+	// pbl_MatchingPair = vec_MathingPair;
 	// printf("ICP match finish.\n");
 	// fprintf(fp_odometry, "%.6f\t%.6f\t%.6f\t%.6f\t\n", pbl_Publish_Match->timestamp, pbl_Publish_Match->x, pbl_Publish_Match->y, pbl_Publish_Match->phi);
 	// printf("HereB\n");
@@ -494,10 +629,12 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *pose_disturbance)
 {
 	pbl_STU_Pose2DStamped *my_matching_result_ = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
-	// *my_matching_result_ = *pbl_Publish_Match;
-	my_matching_result_->x = prv_map_center_x_ - 25 + pose_disturbance->x;
-	my_matching_result_->y = prv_map_center_y_ - 25 + pose_disturbance->y;
+	*my_matching_result_ = *pbl_Publish_Match_Lasttime;
+	// my_matching_result_->x = prv_map_center_x_ - 25 + pose_disturbance->x;
+	// my_matching_result_->y = prv_map_center_y_ - 25 + pose_disturbance->y;
 	my_matching_result_->phi = 0.0 + pose_disturbance->phi;
+
+	pbl_MatchingPair.clear();
 
 	// cloud form to accelerate
 	prv_STU_CloudMap my_Match_Cloud;
@@ -552,7 +689,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *po
 				//  ----------------------------------------------------------------------
 				keepApproaching = true;
 				prv_se2_l2(vec_MathingPair, my_matching_result_);
-				n_vec_PointOffset.push_back(local_ICP_Params.nPointOffset);
+				// n_vec_PointOffset.push_back(local_ICP_Params.nPointOffset);
 				// If matching has not changed, decrease the thresholds:
 				if (!(fabs(my_lastMeanPose->x - my_matching_result_->x) > prv_ICP_Params_Fixed.fMinAbsStep_trans ||
 					  fabs(my_lastMeanPose->y - my_matching_result_->y) > prv_ICP_Params_Fixed.fMinAbsStep_trans ||
@@ -579,29 +716,33 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch_Map2Map(pbl_STU_Pose2DStamped *po
 			{
 				local_ICP_Params.fMaxDistForCorres *= prv_ICP_Params_Fixed.fShrinkRatio;
 			}
-			// Yang test
-			vec_Yang_MatchingPair.push_back(vec_MathingPair);
-			pbl_vec_Yang_MatchResult.push_back(*my_matching_result_);
+			// // Yang test
+			// vec_Yang_MatchingPair.push_back(vec_MathingPair);
+			// pbl_vec_Yang_MatchResult.push_back(*my_matching_result_);
 		} while ((keepApproaching && outInfo_nIterations < prv_ICP_Params_Fixed.nMaxIterations) ||
 				 (outInfo_nIterations >= prv_ICP_Params_Fixed.nMaxIterations && local_ICP_Params.fMaxDistForCorres > prv_ICP_Params_Fixed.fMinThresholdDist));
 	} // end of "if m2 is not empty"
-	nStep = prv_ICP_Params_Fixed.nPointDecimation;
-	*pbl_Publish_Match = *my_matching_result_;
-	pbl_MatchingPair = vec_MathingPair;
+	// nStep = prv_ICP_Params_Fixed.nPointDecimation;
+	pbl_Publish_Match_Assessment.push_back(*my_matching_result_);
+	// pbl_Publish_Match_Assessment.push_back(*pbl_Publish_Match_Lasttime);
+	pbl_MatchingPair.assign(vec_MathingPair.begin(), vec_MathingPair.end());
+	printf("size of matching pair: %d\n", pbl_MatchingPair.size());
 
 	//evolution 
 	{
 		float overlap = 100.0 * (float)vec_MathingPair.size() / my_Match_Cloud.x_vec.size();
 		pbl_STU_Pose2DStamped pose_err;
-		pose_err.x = my_matching_result_->x - (prv_map_center_x_ - 25);
-		pose_err.y = my_matching_result_->y - (prv_map_center_y_ - 25);
+		// pose_err.x = my_matching_result_->x - (prv_map_center_x_ - 25);
+		// pose_err.y = my_matching_result_->y - (prv_map_center_y_ - 25);
+		pose_err.x = my_matching_result_->x - pbl_Publish_Match_Lasttime->x;
+		pose_err.y = my_matching_result_->y - pbl_Publish_Match_Lasttime->y;
 		pose_err.phi = my_matching_result_->phi * 180 / M_PI;
-		printf("pose init: %.3f %.3f %.3fdeg\n", pose_disturbance->x, pose_disturbance->y, pose_disturbance->phi * 180 / M_PI);
-		printf("overlap: %.3f%, pose error: %.3f %.3f %.3fdeg\n", overlap, pose_err.x, pose_err.y, pose_err.phi);
+		// printf("pose init: %.3f %.3f %.3fdeg\n", pose_disturbance->x, pose_disturbance->y, pose_disturbance->phi * 180 / M_PI);
+		// printf("overlap: %.3f%, pose error: %.3f %.3f %.3fdeg\n", overlap, pose_err.x, pose_err.y, pose_err.phi);
 		
 		double score = pose_err.x * pose_err.x + pose_err.y * pose_err.y + pose_err.phi * pose_err.phi;
 		scores.push_back(score);
-		fprintf(fp_odometry, "%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.6f\n", map_sector_1piece.middle_angle, overlap, pose_err.x, pose_err.y, sqrt(pose_err.x * pose_err.x + pose_err.y * pose_err.y), pose_err.phi, score);
+		// fprintf(fp_odometry, "%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.6f\n", map_sector_1piece.middle_angle, overlap, pose_err.x, pose_err.y, sqrt(pose_err.x * pose_err.x + pose_err.y * pose_err.y), pose_err.phi, score);
 
 	}
 }
