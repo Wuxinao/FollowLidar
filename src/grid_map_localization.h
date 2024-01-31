@@ -256,6 +256,14 @@ private:
             a -= static_cast<T>(2.0 * M_PI);
         return a;
     }
+
+    /*-------------------------------------------------*\
+    |	GUI Lidar Input Control                         |
+    \*-------------------------------------------------*/
+private:
+    std::thread pbl_thread_LidarEnableControl;
+    void prv_fnc_LidarEnableControl();
+
     /*-------------------------------------------------*\
     |	my_determineMatching2D                          |
     \*-------------------------------------------------*/

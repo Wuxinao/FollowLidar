@@ -136,6 +136,11 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	pbl_thread_MatchAssessment = std::thread(&CLS_GridMapLocalization::prv_fnc_MatchAssessment, this);
 
 	/*-------------------------------------------------*\
+	|	Lidar Enable GUI Control      	    			|
+	\*-------------------------------------------------*/
+	pbl_thread_LidarEnableControl = std::thread(&CLS_GridMapLocalization::prv_fnc_LidarEnableControl, this);
+
+	/*-------------------------------------------------*\
 	|	ICP parameters            	    				|
 	\*-------------------------------------------------*/
 	// fixed parameters

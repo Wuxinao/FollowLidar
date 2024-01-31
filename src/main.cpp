@@ -205,6 +205,49 @@ void CLS_GridMapLocalization::Callback_Publish_GridMap(const ros::TimerEvent &)
     pbl_mutex_isMatching.unlock();
 }
 
+void CLS_GridMapLocalization::prv_fnc_LidarEnableControl()
+{
+    //lidar input control window
+    cv::namedWindow("ControlWindow", cv::WINDOW_NORMAL);
+
+    cv::Mat OutputArray(cv::Mat::zeros(200, 400, CV_8UC3));
+
+    bool timingStarted = false;
+    ros::Time startTime;
+    ros::Time endTime;
+
+    while (ros::ok()) 
+    {
+        char key = cv::waitKey(10);
+        if (key == 'q' || key == 'Q') 
+        {
+            break;
+        }
+        else if (key == 't' || key == 'T')
+        {
+            // Start timing
+            timingStarted = true;
+            startTime = ros::Time::now();
+            std::string text = "Timing now";
+            OutputArray = cv::Mat::zeros(200, 400, CV_8UC3);
+            cv::putText(OutputArray, text, cv::Point(10, 50), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255));
+        }
+        else if ((key == 'f' || key == 'F') && timingStarted)
+        {
+            // End timing
+            timingStarted = false;
+            endTime = ros::Time::now();
+            double duration = (endTime - startTime).toSec(); // Convert to milliseconds
+
+            std::string text = "Time Duration: " + std::to_string(duration) + " s";
+            OutputArray = cv::Mat::zeros(200, 400, CV_8UC3);
+            cv::putText(OutputArray, text, cv::Point(10, 50), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255));
+        }
+        cv::imshow("ControlWindow", OutputArray);
+    }
+    cv::destroyWindow("ControlWindow");
+}
+
 
 
 int main(int argc, char **argv)
@@ -216,6 +259,7 @@ int main(int argc, char **argv)
 
     ros::MultiThreadedSpinner spinner(0);
     spinner.spin();
+    
 
     return 0;
 }
