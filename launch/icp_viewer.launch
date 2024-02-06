@@ -16,7 +16,8 @@
         <param name="PRMTR_strTopicName_Cloud" type="string" value="/driver/livox/point_cloud" />
         <param name="PRMTR_strTopicName_GPS" type="string" value="/driver/gps/fix" />
         <param name="PRMTR_strTopicName_GPS_Heading" type="string" value="/strong/heading" />
-
+        <param name="PRMTR_strTopicName_IMU" type="string" value="/driver/imu" />
+  
        
         <param name="PRMTR_nInitMode" type="int" value="0" />   <!-- value = 0: GPS; value = 1: MANUAL_SETTING; value = 2: MANUAL_UI -->
         <param name="PRMTR_lfInitPoseX" type="double" value="334685" /> <!--1.334690, 2.334693, 9.334685 10.334698-->

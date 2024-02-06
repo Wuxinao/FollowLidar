@@ -34,6 +34,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	|	Initialization                    				|
 	\*-------------------------------------------------*/
 	pbl_List_Current_Status = STATUS_INITIAL;
+	flag_lidar_available = true;
 
 	prv_map_center_x_ = INT_MAX;
 	prv_map_center_y_ = INT_MAX;
@@ -41,6 +42,8 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	pbl_Publish_Match = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Match_Lasttime = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	pbl_Publish_Cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
+	velocity = 0.0;
+	pre_location.clear();
 	// fp_odometry = fopen("/home/w/502D/NewLoc2D_ws/odometry.txt", "a");
 
 	// init pose disturbance
@@ -69,6 +72,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	ent_pnh.param<std::string>("PRMTR_strTopicName_Cloud", pbl_strTopicName_Cloud, "");
 	ent_pnh.param<std::string>("PRMTR_strTopicName_GPS", pbl_strTopicName_Gps, "");
 	ent_pnh.param<std::string>("PRMTR_strTopicName_GPS_Heading", pbl_strTopicName_Gps_Heading, "");
+	ent_pnh.param<std::string>("PRMTR_strTopicName_IMU", pbl_strTopicName_IMU, "");
 
 	// Set map folder
 	std::string strMapFolder;
@@ -95,7 +99,8 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
     subscriber_lidar = ent_pnh.subscribe<sensor_msgs::PointCloud2>(pbl_strTopicName_Cloud.c_str(), 1, &CLS_GridMapLocalization::Callback_Subscribe_PointCloud, this);
     subscriber_gps = ent_pnh.subscribe<sensor_msgs::NavSatFix>(pbl_strTopicName_Gps.c_str(), 1000, &CLS_GridMapLocalization::Callback_Subscribe_GPS, this);
     subscriber_gps_yaw = ent_pnh.subscribe<cyber_msgs::Heading>(pbl_strTopicName_Gps_Heading, 1, &CLS_GridMapLocalization::Callback_Subscribe_GPS_Head, this);
-	
+	subscriber_imu = ent_pnh.subscribe<sensor_msgs::Imu>(pbl_strTopicName_IMU, 1000, &CLS_GridMapLocalization::Callback_Subscribe_IMU, this);
+
 	/*-------------------------------------------------*\
     |	Publishers and TF                         		|
     \*-------------------------------------------------*/
@@ -133,7 +138,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	/*-------------------------------------------------*\
 	|	Match Assessment            	    			|
 	\*-------------------------------------------------*/
-	pbl_thread_MatchAssessment = std::thread(&CLS_GridMapLocalization::prv_fnc_MatchAssessment, this);
+	// pbl_thread_MatchAssessment = std::thread(&CLS_GridMapLocalization::prv_fnc_MatchAssessment, this);
 
 	/*-------------------------------------------------*\
 	|	Lidar Enable GUI Control      	    			|
@@ -1023,4 +1028,20 @@ bool CLS_GridMapLocalization::prv_se2_l2(std::vector<prv_stu_MatchingPair> &prv_
 	out_transformation->x = mean_x_a - mean_x_b * ccos + mean_y_b * csin;
 	out_transformation->y = mean_y_a - mean_x_b * csin - mean_y_b * ccos;
 	return true;
+}
+
+void CLS_GridMapLocalization::integrateMotion(double dt, sensor_msgs::Imu imu_input)
+{
+	double w = -(imu_input.angular_velocity.z);
+	double a = imu_input.linear_acceleration.x;
+	// Update heading and velocity using the CTRV model equations
+
+	pbl_Publish_Match->phi += w * dt;
+    // velocity += a * dt;
+
+    // Update position based on the updated heading and velocity
+    pbl_Publish_Match->x += velocity * cos(pbl_Publish_Match->phi) * dt;
+    pbl_Publish_Match->y += velocity * sin(pbl_Publish_Match->phi) * dt;
+
+	pbl_Publish_Match->timestamp = imu_input.header.stamp.toSec();
 }

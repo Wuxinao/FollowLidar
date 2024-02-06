@@ -14,6 +14,7 @@
 
 #include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/Imu.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include "cyber_msgs/Heading.h"
@@ -56,14 +57,18 @@ public:
     void Callback_Subscribe_GPS(const sensor_msgs::NavSatFixConstPtr &fix_msg);
     void Callback_Subscribe_GPS_Head(const cyber_msgs::HeadingConstPtr &heading_msg);
     void Callback_Subscribe_PointCloud(const sensor_msgs::PointCloud2ConstPtr &cloud_msg);
+    void Callback_Subscribe_IMU(const sensor_msgs::Imu::ConstPtr &imu_msg);
 
     ros::Subscriber subscriber_lidar;
     ros::Subscriber subscriber_gps;
     ros::Subscriber subscriber_gps_yaw;
+    ros::Subscriber subscriber_imu;
 
     std::string pbl_strTopicName_Cloud;
     std::string pbl_strTopicName_Gps;
     std::string pbl_strTopicName_Gps_Heading;
+    std::string pbl_strTopicName_IMU;
+
     /*-------------------------------------------------*\
     |	Publish       		            				|
     \*-------------------------------------------------*/
@@ -337,7 +342,21 @@ public:
     std::vector<pbl_STU_Pose2DStamped> pbl_vec_Yang_MatchResult;
     std::vector<int> n_vec_PointOffset;
     int nStep;
+
+    /*-------------------------------------------------*\
+    |	IMU dead-reckoning	            				|
+    \*-------------------------------------------------*/
+
+public:
+    void integrateMotion(double dt, sensor_msgs::Imu imu_input);
+    double velocity;
+    std::vector<pbl_STU_Pose2DStamped> pre_location;
+    bool flag_lidar_available;
+    void caculate_velocity();
 };
+
+
+
 
 
 //utm origin
