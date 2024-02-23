@@ -70,6 +70,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
 	pbl_List_Project = static_cast<CLS_GridMapLocalization::pbl_LIST_Project_Name>(nProjectID);
 	// Set topic name
 	ent_pnh.param<std::string>("PRMTR_strTopicName_Cloud", pbl_strTopicName_Cloud, "");
+	ent_pnh.param<std::string>("PRMTR_strTopicName_Cloud_Avia", pbl_strTopicName_Cloud_Avia, "");
 	ent_pnh.param<std::string>("PRMTR_strTopicName_GPS", pbl_strTopicName_Gps, "");
 	ent_pnh.param<std::string>("PRMTR_strTopicName_GPS_Heading", pbl_strTopicName_Gps_Heading, "");
 	ent_pnh.param<std::string>("PRMTR_strTopicName_IMU", pbl_strTopicName_IMU, "");
@@ -97,6 +98,7 @@ CLS_GridMapLocalization::CLS_GridMapLocalization(ros::NodeHandle &ent_pnh)
     |	Subscribers		                         		|
     \*-------------------------------------------------*/
     subscriber_lidar = ent_pnh.subscribe<sensor_msgs::PointCloud2>(pbl_strTopicName_Cloud.c_str(), 1, &CLS_GridMapLocalization::Callback_Subscribe_PointCloud, this);
+	subscriber_lidar_avia = ent_pnh.subscribe<sensor_msgs::PointCloud2>(pbl_strTopicName_Cloud_Avia.c_str(), 1, &CLS_GridMapLocalization::Callback_Subscribe_PointCloud_Avia, this);
     subscriber_gps = ent_pnh.subscribe<sensor_msgs::NavSatFix>(pbl_strTopicName_Gps.c_str(), 1000, &CLS_GridMapLocalization::Callback_Subscribe_GPS, this);
     subscriber_gps_yaw = ent_pnh.subscribe<cyber_msgs::Heading>(pbl_strTopicName_Gps_Heading, 1, &CLS_GridMapLocalization::Callback_Subscribe_GPS_Head, this);
 	subscriber_imu = ent_pnh.subscribe<sensor_msgs::Imu>(pbl_strTopicName_IMU, 1000, &CLS_GridMapLocalization::Callback_Subscribe_IMU, this);
@@ -386,6 +388,9 @@ void CLS_GridMapLocalization::prv_fnc_MatchAssessment()
 	while (true)
 	{
 		// sleep(5);
+		//terrace is rotating
+		while (!flag_lidar_available);
+
 		pbl_mutex_isMatching.lock();
 		*pbl_Publish_Match_Lasttime = *pbl_Publish_Match;
 		pbl_mutex_isMatching.unlock();
@@ -445,6 +450,16 @@ void CLS_GridMapLocalization::prv_fnc_MatchAssessment()
 
 		//publish best orientation
 		int best_score_idx = std::min_element(scores.begin(), scores.end()) - scores.begin();
+		
+		//TODO：check whether lidar_heading could be negative.
+		//TODO: adjust thre_spin.
+		int current_score_idx = std::round(lidar_heading / sector_angle_step);
+		if (scores[current_score_idx] > thre_spin && scores[best_score_idx] < thre_spin)
+		{
+			//TODO: terrace spin
+			flag_lidar_available = false;
+		}
+
         nav_msgs::Odometry OdomMsg_AssessResult;
         OdomMsg_AssessResult.pose.pose.position.x = pbl_Publish_Match_Assessment[best_score_idx].x;
         OdomMsg_AssessResult.pose.pose.position.y = pbl_Publish_Match_Assessment[best_score_idx].y;
@@ -519,6 +534,9 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 	// printf("HereA\n");
 	pbl_STU_Pose2DStamped *my_matching_result_ = new CLS_GridMapLocalization::pbl_STU_Pose2DStamped;
 	*my_matching_result_ = *pbl_Publish_Match;
+	// lidar_heading
+	double current_lidar_heading = lidar_heading;
+	my_matching_result_->phi += current_lidar_heading;
 
 	// cloud form to accelerate
 	prv_STU_CloudMap my_Match_Cloud;
@@ -620,6 +638,7 @@ bool CLS_GridMapLocalization::pbl_fnc_IcpMatch(const pcl::PointCloud<pcl::PointX
 				 (outInfo_nIterations >= prv_ICP_Params_Fixed.nMaxIterations && local_ICP_Params.fMaxDistForCorres > prv_ICP_Params_Fixed.fMinThresholdDist));
 	} // end of "if m2 is not empty"
 	// nStep = prv_ICP_Params_Fixed.nPointDecimation;
+	my_matching_result_->phi -= current_lidar_heading;
 	*pbl_Publish_Match = *my_matching_result_;
 	printf("cloud size: %d, matching pair: %d.\n", ent_cloud->points.size(), vec_MathingPair.size());
 	// pbl_MatchingPair = vec_MathingPair;

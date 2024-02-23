@@ -57,14 +57,17 @@ public:
     void Callback_Subscribe_GPS(const sensor_msgs::NavSatFixConstPtr &fix_msg);
     void Callback_Subscribe_GPS_Head(const cyber_msgs::HeadingConstPtr &heading_msg);
     void Callback_Subscribe_PointCloud(const sensor_msgs::PointCloud2ConstPtr &cloud_msg);
+    void Callback_Subscribe_PointCloud_Avia(const sensor_msgs::PointCloud2ConstPtr &cloud_msg);
     void Callback_Subscribe_IMU(const sensor_msgs::Imu::ConstPtr &imu_msg);
 
     ros::Subscriber subscriber_lidar;
+    ros::Subscriber subscriber_lidar_avia;
     ros::Subscriber subscriber_gps;
     ros::Subscriber subscriber_gps_yaw;
     ros::Subscriber subscriber_imu;
 
     std::string pbl_strTopicName_Cloud;
+    std::string pbl_strTopicName_Cloud_Avia;
     std::string pbl_strTopicName_Gps;
     std::string pbl_strTopicName_Gps_Heading;
     std::string pbl_strTopicName_IMU;
@@ -350,6 +353,8 @@ public:
 public:
     void integrateMotion(double dt, sensor_msgs::Imu imu_input);
     double velocity;
+    double lidar_heading;
+    double thre_spin;
     std::vector<pbl_STU_Pose2DStamped> pre_location;
     bool flag_lidar_available;
     void caculate_velocity();

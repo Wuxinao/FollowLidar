@@ -14,6 +14,7 @@
         
         <param name="PRMTR_nProjectID" type="int" value="1" />   <!-- value = 0: Baoxin; value = 1: Hexi -->
         <param name="PRMTR_strTopicName_Cloud" type="string" value="/driver/livox/point_cloud" />
+        <param name="PRMTR_strTopicName_Cloud" type="string" value="/livox/lidar" />
         <param name="PRMTR_strTopicName_GPS" type="string" value="/driver/gps/fix" />
         <param name="PRMTR_strTopicName_GPS_Heading" type="string" value="/strong/heading" />
         <param name="PRMTR_strTopicName_IMU" type="string" value="/driver/imu" />

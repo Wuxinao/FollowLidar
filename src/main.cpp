@@ -17,6 +17,9 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 
+//livox_ros_driver
+#include <livox_ros_driver/CustomMsg.h>
+
 // GPS-UTM Convert
 #include <sensor_msgs/NavSatFix.h>
 #include <geographic_msgs/GeoPointStamped.h>
@@ -33,6 +36,7 @@ bool isGPSInitial = false;
 int  initial_cnt = 3;
 
 FILE *fp_score;
+
 
 /*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
 █	Author: Chenxi Yang		Create: 2021.11.09							█
@@ -172,6 +176,20 @@ void CLS_GridMapLocalization::Callback_Subscribe_PointCloud(const sensor_msgs::P
         pre_location.clear();
 }
 
+/*▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼*\
+█	Author: Xinao Wu		Create: 2024.2.23							█
+█	Point Cloud 							    					    █
+█	Input:  -															█
+█	Output: localization_result											█
+\*▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲*/
+void CLS_GridMapLocalization::Callback_Subscribe_PointCloud_Avia(const sensor_msgs::PointCloud2ConstPtr &cloud_msg)
+{
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::fromROSMsg(*cloud_msg, *cloud);
+
+    publisher_PointCloud2_Lidar->publish(cloud_msg);
+}
+
 void CLS_GridMapLocalization::caculate_velocity()
 {
     double v1 = sqrt(pow((pre_location[3].x - pre_location[0].x), 2) + pow((pre_location[3].y - pre_location[0].y), 2)) / (pre_location[3].timestamp - pre_location[0].timestamp);
@@ -289,6 +307,7 @@ void CLS_GridMapLocalization::prv_fnc_LidarEnableControl()
             timingStarted = false;
             endTime = ros::Time::now();
             double duration = (endTime - startTime).toSec(); // Convert to milliseconds
+            //TODO: read lidar_heading from terrace
 
             std::string text = "Time Duration: " + std::to_string(duration) + " s";
             OutputArray = cv::Mat::zeros(200, 400, CV_8UC3);
